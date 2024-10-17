@@ -1,0 +1,71 @@
+# RAG QA Bot with OpenAI API and Pinecone DB
+
+## Step 1: Install Libraries
+!pip install openai pinecone-client python-dotenv
+
+## Step 2: Import Libraries
+import openai
+import pinecone
+import os
+from dotenv import load_dotenv
+
+## Step 3: Load Environment Variables
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
+pinecone_api_key = os.getenv("PINECONE_API_KEY")
+
+## Step 4: Initialize Pinecone
+pinecone.init(api_key=pinecone_api_key, environment='us-west1-gcp')
+index_name = "business-qa"
+if index_name not in pinecone.list_indexes():
+    pinecone.create_index(index_name, dimension=768)
+
+index = pinecone.Index(index_name)
+
+## Step 5: Function to Embed Text
+def embed_text(text):
+    response = openai.Embedding.create(
+        input=text,
+        model="text-embedding-ada-002"
+    )
+    return response['data'][0]['embedding']
+
+## Step 6: Add Data to Pinecone
+documents = [
+    {"text": "What is the return policy?", "metadata": {"category": "policy"}},
+    {"text": "How to contact customer service?", "metadata": {"category": "contact"}},
+    {"text": "What are the business hours?", "metadata": {"category": "hours"}},
+]
+
+for doc in documents:
+    embedding = embed_text(doc['text'])
+    index.upsert([(doc['text'], embedding, doc['metadata'])])
+
+## Step 7: Retrieve Relevant Documents
+def retrieve_documents(query, top_k=5):
+    query_embedding = embed_text(query)
+    results = index.query(query_embedding, top_k=top_k, include_metadata=True)
+    return results
+
+## Step 8: Generate an Answer
+def generate_answer(query):
+    retrieved_docs = retrieve_documents(query)
+    
+    context = "\n".join([doc['metadata']['category'] + ": " + doc['id'] for doc in retrieved_docs['matches']])
+    
+    prompt = f"Answer the following question based on the context:\n{context}\n\nQuestion: {query}\nAnswer:"
+    
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    return response.choices[0].message['content']
+
+## Step 9: Example Query
+query = "What is the return policy?"
+answer = generate_answer(query)
+print(answer)
+
+## Step 10: Clean Up
+pinecone.delete_index(index_name)
